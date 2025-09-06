@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ランダム観光スポット提案 | Google Maps + Places</title>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans JP", sans-serif }
+    #app { display: grid; grid-template-columns: 360px 1fr; grid-template-rows: auto 1fr; height: 100%; }
+    header { grid-column: 1 / -1; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; margin: 0; }
+    #controls { padding: 12px; border-right: 1px solid #e5e7eb; overflow: auto; }
+    #map { position: relative; }
+    #map, #pano { width: 100%; height: 100%; }
+    .row { margin-bottom: 12px; }
+    label { display: block; font-size: 12px; color: #374151; margin-bottom: 4px; }
+    select, input[type="number"], input[type="text"] { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; }
+    input[type="checkbox"] { transform: translateY(1px); }
+    button { cursor: pointer; padding: 10px 12px; border-radius: 10px; border: 1px solid #d1d5db; background: #111827; color: white; font-weight: 600; }
+    button.secondary { background: white; color: #111827; }
+    .stack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .place-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin-top: 8px; background:#fff; }
+    .photo { width: 100%; border-radius: 8px; object-fit: cover; aspect-ratio: 16/9; background: #f3f4f6; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tabs { display:flex; gap:8px; }
+    .tab { padding:8px 10px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; font-size:12px; cursor:pointer }
+    .tab.active { background:#111827; color:#fff; }
+    @media (max-width: 900px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
+      #controls { border-right: none; border-bottom:1px solid #e5e7eb; }
+      .split { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>🎲 ランダム観光スポット提案</h1>
+      <span class="muted">現在地または任意の場所の近くから、ランダムでスポットを1件おすすめします。</span>
+    </header>
+
+    <section id="controls">
+      <div class="row">
+        <label>検索基準位置（緯度,経度） <span class="muted">空なら現在地を使用</span></label>
+        <div class="split">
+          <input id="lat" type="text" placeholder="例) 35.681236" />
+          <input id="lng" type="text" placeholder="例) 139.767125" />
+        </div>
+        <div class="stack" style="margin-top:8px">
+          <button id="use-geoloc" class="secondary">📍 現在地を取得</button>
+          <span id="geoloc-status" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>スポットの種類（Places type）</label>
+        <select id="type">
+          <option value="tourist_attraction">tourist_attraction（観光名所）</option>
+          <option value="cafe">cafe（カフェ）</option>
+          <option value="restaurant">restaurant（レストラン）</option>
+          <option value="park">park（公園）</option>
+          <option value="museum">museum（博物館）</option>
+          <option value="book_store">book_store（本屋）</option>
+          <option value="aquarium">aquarium（水族館）</option>
+          <option value="art_gallery">art_gallery（美術館）</option>
+          <option value="shopping_mall">shopping_mall（ショッピング）</option>
+          <option value="point_of_interest">point_of_interest（何でも）</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>検索半径（m）</label>
+        <input id="radius" type="number" min="100" max="50000" step="100" value="2000" />
+      </div>
+
+      <div class="row stack">
+        <label class="stack"><input id="open-now" type="checkbox" /> 営業中のみ</label>
+        <label class="stack"><input id="min4" type="checkbox" /> ★4.0以上</label>
+        <label class="stack"><input id="photoOnly" type="checkbox" /> 写真ありのみ</label>
+      </div>
+
+      <div class="row stack">
+        <button id="random">🎲 ランダムで選ぶ</button>
+        <button id="another" class="secondary">🔁 別の候補</button>
+      </div>
+
+      <div id="result" class="place-card" hidden>
+        <img id="photo" class="photo" alt="place photo" />
+        <h3 id="name"></h3>
+        <div id="meta" class="muted"></div>
+        <div id="addr" style="margin-top:6px"></div>
+        <div class="stack" style="margin-top:8px">
+          <a id="gmapLink" target="_blank"><button class="secondary">🧭 Googleマップで開く</button></a>
+          <a id="callLink" target="_blank" hidden><button class="secondary">📞 電話</button></a>
+          <button id="detailsBtn">ℹ️ 詳細</button>
+        </div>
+      </div>
+
+      <details style="margin-top:12px">
+        <summary>⚙️ 開発者向けヒント</summary>
+        <ul>
+          <li>このページをホストする際は <strong>?key=YOUR_API_KEY&language=ja&region=JP&libraries=places</strong> を使います。</li>
+          <li>APIキーは <em>HTTP リファラ制限</em> を必ず設定してください（localhost と本番ドメイン）。</li>
+          <li>課金は有効化が必要です。Nearby Search・Place Details・Static Street View を使用しています。</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="map"></section>
+  </div>
+
+  <script>
+    // === 使用方法 ===
+    // 1) 下の <script src="https://maps.googleapis.com/maps/api/js?..."> の YOUR_API_KEY を差し替え。
+    // 2) ローカルで開くか、静的ホスティングに配置。
+    // 3) 「📍現在地を取得」→「🎲ランダムで選ぶ」で使えます。
+
+    let map, marker, service, panorama;
+    let lastResults = [];
+    let currentIndex = -1;
+    let currentCenter = { lat: 35.681236, lng: 139.767125 }; // 東京駅（現在地取得失敗時のフォールバック）
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: currentCenter,
+        zoom: 14,
+        mapTypeControl: false,
+        streetViewControl: true,
+        fullscreenControl: true,
+      });
+      service = new google.maps.places.PlacesService(map);
+
+      // 初期マーカー
+      marker = new google.maps.Marker({ map, position: currentCenter });
+
+      // Street View パネル
+      panorama = new google.maps.StreetViewPanorama(document.createElement('div'), {
+        pov: { heading: 34, pitch: 10 },
+        visible: false,
+      });
+      map.setStreetView(panorama);
+
+      // UI リスナー
+      document.getElementById('use-geoloc').addEventListener('click', useGeolocation);
+      document.getElementById('random').addEventListener('click', () => runSearch(true));
+      document.getElementById('another').addEventListener('click', () => pickAnother());
+      document.getElementById('detailsBtn').addEventListener('click', fetchDetailsForCurrent);
+    }
+
+    function useGeolocation() {
+      const status = document.getElementById('geoloc-status');
+      status.textContent = '取得中…';
+      if (!navigator.geolocation) {
+        status.textContent = 'このブラウザは位置情報に対応していません。';
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(pos => {
+        currentCenter = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        updateCenterInputs(currentCenter);
+        map.setCenter(currentCenter);
+        marker.setPosition(currentCenter);
+        status.textContent = `緯度:${currentCenter.lat.toFixed(5)} 経度:${currentCenter.lng.toFixed(5)}`;
+      }, err => {
+        console.warn(err);
+        status.textContent = '現在地取得に失敗しました（権限・設定を確認）';
+      }, { enableHighAccuracy: true, timeout: 8000 });
+    }
+
+    function centerFromInputs() {
+      const latV = parseFloat(document.getElementById('lat').value);
+      const lngV = parseFloat(document.getElementById('lng').value);
+      if (!isNaN(latV) && !isNaN(lngV)) {
+        return { lat: latV, lng: lngV };
+      }
+      return currentCenter; // 現在地 or 既定
+    }
+
+    function updateCenterInputs({lat, lng}) {
+      document.getElementById('lat').value = lat.toFixed(6);
+      document.getElementById('lng').value = lng.toFixed(6);
+    }
+
+    function runSearch(resetIndex = true) {
+      const type = document.getElementById('type').value;
+      const radius = Math.min(50000, Math.max(100, parseInt(document.getElementById('radius').value || '2000')));
+      const openNow = document.getElementById('open-now').checked;
+      const min4 = document.getElementById('min4').checked;
+      const photoOnly = document.getElementById('photoOnly').checked;
+
+      const center = centerFromInputs();
+      currentCenter = center;
+      map.setCenter(center);
+      marker.setPosition(center);
+
+      const req = {
+        location: center,
+        radius,
+        type,
+        openNow: openNow || undefined,
+        language: 'ja',
+        region: 'JP',
+      };
+
+      service.nearbySearch(req, (results, status, pagination) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !results?.length) {
+          alert('候補が見つかりませんでした。条件を緩めて再試行してください。');
+          return;
+        }
+        // オプションフィルタ
+        let filtered = results;
+        if (min4) filtered = filtered.filter(r => (r.rating || 0) >= 4);
+        if (photoOnly) filtered = filtered.filter(r => Array.isArray(r.photos) && r.photos.length > 0);
+        if (!filtered.length) filtered = results; // フィルタで空になったら元に戻す
+
+        lastResults = filtered;
+        if (resetIndex) currentIndex = -1;
+        pickAnother();
+      });
+    }
+
+    function pickAnother() {
+      if (!lastResults.length) {
+        runSearch();
+        return;
+      }
+      // ランダムに次インデックス選択（同じを連続で避ける）
+      let next;
+      if (lastResults.length === 1) {
+        next = 0;
+      } else {
+        do { next = Math.floor(Math.random() * lastResults.length); } while (next === currentIndex);
+      }
+      currentIndex = next;
+      const place = lastResults[currentIndex];
+      showPlace(place);
+    }
+
+    function showPlace(place) {
+      const pos = place.geometry?.location;
+      if (pos) {
+        map.panTo(pos);
+        map.setZoom(16);
+        marker.setPosition(pos);
+      }
+      const resultEl = document.getElementById('result');
+      const photoEl = document.getElementById('photo');
+      const nameEl = document.getElementById('name');
+      const metaEl = document.getElementById('meta');
+      const addrEl = document.getElementById('addr');
+      const gmapLink = document.getElementById('gmapLink');
+      const callLink = document.getElementById('callLink');
+
+      nameEl.textContent = place.name || '名称不明';
+      const rating = place.rating ? `★${place.rating.toFixed(1)}（${place.user_ratings_total || 0}件）` : '評価なし';
+      metaEl.textContent = [rating, place.types?.[0]].filter(Boolean).join(' · ');
+
+      // 住所や営業状況は Details でより正確に取得できるが、近傍検索の結果にも近似あり
+      addrEl.textContent = place.vicinity || '';
+
+      // 写真
+      if (place.photos?.length) {
+        photoEl.src = place.photos[0].getUrl({ maxWidth: 1200, maxHeight: 800 });
+        photoEl.hidden = false;
+      } else {
+        photoEl.hidden = true;
+        photoEl.removeAttribute('src');
+      }
+
+      // Googleマップへの導線
+      const q = encodeURIComponent(place.name + (place.vicinity ? ' ' + place.vicinity : ''));
+      gmapLink.href = `https://www.google.com/maps/search/?api=1&query=${q}`;
+
+      // 電話は Details 取得後に設定
+      callLink.href = '#';
+      callLink.hidden = true;
+
+      resultEl.hidden = false;
+
+      // ストリートビューをトライ（なければ非表示）
+      const sv = new google.maps.StreetViewService();
+      sv.getPanorama({ location: pos, radius: 80 }, (data, status) => {
+        if (status === 'OK') {
+          panorama.setPano(data.location.pano);
+          panorama.setPov({ heading: 34, pitch: 10 });
+          panorama.setVisible(true);
+        } else {
+          panorama.setVisible(false);
+        }
+      });
+    }
+
+    function fetchDetailsForCurrent() {
+      const place = lastResults[currentIndex];
+      if (!place) return;
+      service.getDetails({
+        placeId: place.place_id,
+        language: 'ja',
+        fields: ['name','formatted_address','formatted_phone_number','opening_hours','website','url','photos','geometry']
+      }, (details, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !details) {
+          alert('詳細情報の取得に失敗しました。');
+          return;
+        }
+        // 画面更新
+        document.getElementById('name').textContent = details.name || place.name;
+        document.getElementById('addr').textContent = details.formatted_address || place.vicinity || '';
+        if (details.photos?.length) {
+          document.getElementById('photo').src = details.photos[0].getUrl({ maxWidth: 1200, maxHeight: 800 });
+          document.getElementById('photo').hidden = false;
+        }
+        if (details.formatted_phone_number) {
+          const callLink = document.getElementById('callLink');
+          callLink.href = `tel:${details.formatted_phone_number.replace(/\s/g,'')}`;
+          callLink.hidden = false;
+        }
+        // Googleマップ公式 URL が手に入れば差し替え
+        if (details.url) {
+          document.getElementById('gmapLink').href = details.url;
+        }
+        // マップ位置をより正確に
+        if (details.geometry?.location) {
+          map.panTo(details.geometry.location);
+          marker.setPosition(details.geometry.location);
+        }
+      });
+    }
+  </script>
+  <!-- ▼▼▼ あなたの API キーに差し替え ▼▼▼
+       * 重要: APIキーは HTTP リファラ制限を設定してください
+       * 例: http://localhost:*, https://yourdomain.example/*
+  -->
+
+  <script src="./config.js"></script>
+  <script>
+    (function () {
+      const key = window.CONFIG?.GOOGLE_MAPS_API_KEY;
+      if (!key) {
+        alert("APIキーが設定されていません");
+        return;
+      }
+      const s = document.createElement("script");
+      s.async = true;
+      s.src =
+        "https://maps.googleapis.com/maps/api/js" +
+        `?key=${encodeURIComponent(key)}` +
+        "&loading=async&libraries=places&language=ja&region=JP&callback=initMap";
+      document.head.appendChild(s);
+    })();
+    </script>
+</body>
+</html>
